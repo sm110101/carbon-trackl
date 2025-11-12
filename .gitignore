@@ -7,8 +7,5 @@ build/
 .DS_Store
 *.png
 .carbontrack/
-carbontrack/_pycache_/*
-carbontrack/__init__.py
-carbontrack/cli.py
 carbontrack/maintenance.py
 README.md
