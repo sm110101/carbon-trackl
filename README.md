@@ -4,9 +4,16 @@ Quickstart
 
 1) Install (dev mode)
 
+Clone this repository:
+```bash 
+git clone https://github.com/sm110101/carbon-trackl.git
+```
+
+
 ```bash
 python -m venv .venv
 .venv\Scripts\activate  # Windows PowerShell
+source .venv/bin/activate # Mac
 pip install -U pip
 pip install -e .
 ```
