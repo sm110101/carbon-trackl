@@ -10,6 +10,5 @@ build/
 carbontrack/_pycache_/*
 carbontrack/__init__.py
 carbontrack/cli.py
-carbontrack/viz.py
 carbontrack/maintenance.py
 README.md
