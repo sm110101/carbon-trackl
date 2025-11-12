@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "carbontrack"
+version = "0.1.0"
+description = "CarbonTrackCLI – Track, preprocess, forecast, and visualize CO2 emissions from the terminal."
+readme = "README.md"
+requires-python = ">=3.9"
+authors = [
+  { name="Sean Morris" }
+]
+keywords = ["climate", "carbon", "emissions", "cli", "forecasting", "owid"]
+dependencies = [
+  "pandas>=2.1.0",
+  "requests>=2.31.0",
+  "matplotlib>=3.8.0",
+  "scikit-learn>=1.3.0",
+  "pyarrow>=14.0.0"
+]
+
+[project.scripts]
+carbontrack = "carbontrack.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["carbontrack*"]
+
+
