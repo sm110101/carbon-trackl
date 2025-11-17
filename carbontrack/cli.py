@@ -10,6 +10,12 @@ from . import model as model_mod
 from . import viz as viz_mod
 from . import maintenance as maint_mod
 
+try:
+    # Optional import; dependency is declared, but handle gracefully if unavailable
+    from codecarbon import EmissionsTracker  # type: ignore
+except Exception:  # pragma: no cover
+    EmissionsTracker = None  # type: ignore
+
 
 def cmd_fetch(args: argparse.Namespace) -> None:
     if args.source.lower() in ("owid", "all"):
@@ -99,8 +105,34 @@ def main(argv: Optional[list[str]] = None) -> None:
     parser = build_parser()
     args = parser.parse_args(argv)
     # initialize cache dir early to ensure subdirs exist
-    get_cache_dir(args.cache_dir)
-    args.func(args)
+    base = get_cache_dir(args.cache_dir)
+
+    tracker = None
+    emissions_dir = base / "emissions"
+    emissions_kg = None
+    if EmissionsTracker is not None:
+        emissions_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            tracker = EmissionsTracker(
+                project_name="CarbonTrackCLI",
+                output_dir=str(emissions_dir),
+                log_level="warning",
+                save_to_file=True,
+            )
+            tracker.start()
+        except Exception:
+            tracker = None
+
+    try:
+        args.func(args)
+    finally:
+        if tracker is not None:
+            try:
+                emissions_kg = tracker.stop()
+            except Exception:
+                emissions_kg = None
+        if emissions_kg is not None:
+            print(f"CodeCarbon: {emissions_kg:.6f} kg CO2e logged -> {emissions_dir}")
 
 
 if __name__ == "__main__":

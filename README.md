@@ -53,6 +53,7 @@ Notes
 - Cache location defaults to `~/.carbontrack`. Override with `--cache-dir PATH` or env `CARBONTRACK_CACHE_DIR`.
 - Standardized schema: `country, year, sector, emissions_co2e, population, gdp`. For MVP, `sector="all"` from OWID aggregates.
 - The forecasting model is a simple Linear Regression baseline. It can be swapped later for XGBoost.
+- CodeCarbon is enabled by default. Each command run is tracked and a CSV log is written to `<cache_dir>/emissions/`. A brief summary (kg CO2e) is printed after the command completes.
 
 Uninstall
 
