@@ -19,6 +19,47 @@ try:
 except Exception:  # pragma: no cover
     EmissionsTracker = None  # type: ignore
 
+try:
+    from rich.console import Console  # type: ignore
+    from rich.table import Table  # type: ignore
+    from rich import box  # type: ignore
+except Exception:  # pragma: no cover
+    Console = None  # type: ignore
+    Table = None  # type: ignore
+    box = None  # type: ignore
+
+
+# Palette
+PALETTE = {
+    "primary": "#1f77b4",
+    "accent": "#ff7f0e",
+    "ok": "#2ca02c",
+    "warn": "#d8a200",
+    "error": "#d62728",
+    "muted": "#6c757d",
+}
+
+
+def _get_console() -> "Console | None":
+    return Console(color_system="auto", highlight=False) if Console is not None else None
+
+
+def _colorize_co2e(value_kg: float) -> str:
+    if value_kg is None:
+        return "n/a"
+    if value_kg >= 1.0:
+        text = f"{value_kg:.3f} kg CO2e"
+        color = PALETTE["error"]
+    elif value_kg >= 0.001:
+        grams = value_kg * 1_000.0
+        text = f"{grams:.1f} g CO2e"
+        color = PALETTE["warn"]
+    else:
+        mg = value_kg * 1_000_000.0
+        text = f"{mg:.0f} mg CO2e"
+        color = PALETTE["ok"]
+    return f"[{color}]{text}[/{color}]"
+
 
 def _configure_codecarbon_logging() -> None:
     try:
@@ -127,8 +168,8 @@ def cmd_emissions(args: argparse.Namespace) -> None:
 
         print(json.dumps(out_df.to_dict(orient="records")))
     else:
-        # Nicely formatted table
-        # Rename a couple columns for readability if present
+        cons = _get_console()
+        # Prepare dataframe
         rename_map = {}
         if "duration" in out_df.columns:
             rename_map["duration"] = "duration_s"
@@ -136,15 +177,39 @@ def cmd_emissions(args: argparse.Namespace) -> None:
             rename_map["emissions"] = "emissions_kg"
         if rename_map:
             out_df = out_df.rename(columns=rename_map)
-        # Add human-readable emissions column
         if "emissions_kg" in out_df.columns:
             out_df = out_df.copy()
             out_df["co2e"] = out_df["emissions_kg"].apply(_format_emissions)
-            # Prefer a concise default column order if possible
-            order = [c for c in ["timestamp", "duration_s", "co2e", "run_id", "project_name"] if c in out_df.columns]
-            if order:
-                out_df = out_df[order]
-        print(out_df.to_string(index=False))
+        order = [c for c in ["timestamp", "duration_s", "co2e", "run_id", "project_name"] if c in out_df.columns]
+        if order:
+            out_df = out_df[order]
+        if cons is None or Table is None:
+            print(out_df.to_string(index=False))
+        else:
+            table = Table(title=None, box=box.SIMPLE_HEAVY if box else None, show_lines=False, header_style=f"bold {PALETTE['primary']}")
+            for col in out_df.columns:
+                justify = "left"
+                if col in ("duration_s",):
+                    justify = "right"
+                table.add_column(col, justify=justify, style=PALETTE["muted"] if col not in ("co2e",) else PALETTE["accent"])
+            for _, row in out_df.iterrows():
+                cells = []
+                for col in out_df.columns:
+                    val = row[col]
+                    if col == "co2e":
+                        # recolor using magnitude buckets
+                        try:
+                            # derive numeric from emissions_kg if available
+                            if "emissions_kg" in row:
+                                cells.append(_colorize_co2e(float(row["emissions_kg"])))
+                            else:
+                                cells.append(str(val))
+                        except Exception:
+                            cells.append(str(val))
+                    else:
+                        cells.append(str(val))
+                table.add_row(*cells)
+            cons.print(table)
 
 
 def _load_standardized_df(cache_dir: Optional[str]):
@@ -163,9 +228,15 @@ def cmd_info(args: argparse.Namespace) -> None:
     num_countries = df["country"].nunique() if "country" in df.columns else 0
     min_year = int(df["year"].min()) if "year" in df.columns and len(df) else 0
     max_year = int(df["year"].max()) if "year" in df.columns and len(df) else 0
-    print(f"Rows: {num_rows}")
-    print(f"Countries: {num_countries}")
-    print(f"Year range: {min_year}–{max_year}")
+    cons = _get_console()
+    if cons:
+        cons.print(f"[{PALETTE['primary']}]Rows:[/{PALETTE['primary']}] {num_rows}")
+        cons.print(f"[{PALETTE['primary']}]Countries:[/{PALETTE['primary']}] {num_countries}")
+        cons.print(f"[{PALETTE['primary']}]Year range:[/{PALETTE['primary']}] {min_year}–{max_year}")
+    else:
+        print(f"Rows: {num_rows}")
+        print(f"Countries: {num_countries}")
+        print(f"Year range: {min_year}–{max_year}")
 
 
 def cmd_countries(args: argparse.Namespace) -> None:
@@ -176,8 +247,13 @@ def cmd_countries(args: argparse.Namespace) -> None:
         series = series[series.str.lower().str.contains(needle)]
     if args.limit:
         series = series.head(args.limit)
-    for c in series:
-        print(c)
+    cons = _get_console()
+    if cons:
+        for c in series:
+            cons.print(f"[{PALETTE['primary']}]•[/{PALETTE['primary']}] {c}")
+    else:
+        for c in series:
+            print(c)
 
 
 def cmd_sectors(args: argparse.Namespace) -> None:
@@ -193,21 +269,41 @@ def cmd_sectors(args: argparse.Namespace) -> None:
         series = series[series.str.lower().str.contains(needle)]
     if args.limit:
         series = series.head(args.limit)
-    for s in series:
-        print(s)
+    cons = _get_console()
+    if cons:
+        for s in series:
+            cons.print(f"[{PALETTE['accent']}]•[/{PALETTE['accent']}] {s}")
+    else:
+        for s in series:
+            print(s)
 
 
 def cmd_years(args: argparse.Namespace) -> None:
     if not args.country:
-        print("Please specify --country")
+        cons = _get_console()
+        msg = f"[{PALETTE['error']}]Please specify --country[/{PALETTE['error']}]"
+        if cons:
+            cons.print(msg)
+        else:
+            print("Please specify --country")
         sys.exit(2)
     df = _load_standardized_df(args.cache_dir)
     sub = df[df["country"] == args.country]
     if len(sub) == 0:
-        print(f"No rows for country '{args.country}'.")
+        cons = _get_console()
+        msg = f"[{PALETTE['warn']}]No rows for country '{args.country}'.[/{PALETTE['warn']}]"
+        if cons:
+            cons.print(msg)
+        else:
+            print(f"No rows for country '{args.country}'.")
         return
     years = sub["year"].astype(int)
-    print(f"{args.country}: {int(years.min())}–{int(years.max())}  ({len(sub)} rows)")
+    cons = _get_console()
+    msg = f"[{PALETTE['primary']}]{args.country}[/{PALETTE['primary']}] : {int(years.min())}–{int(years.max())}  ({len(sub)} rows)"
+    if cons:
+        cons.print(msg)
+    else:
+        print(f"{args.country}: {int(years.min())}–{int(years.max())}  ({len(sub)} rows)")
 
 
 def cmd_top(args: argparse.Namespace) -> None:
@@ -222,7 +318,16 @@ def cmd_top(args: argparse.Namespace) -> None:
         print(f"No rows for year {args.year}.")
         return
     sub = sub.sort_values("emissions_co2e", ascending=False).head(args.limit)
-    print(sub.to_string(index=False))
+    cons = _get_console()
+    if cons and Table is not None:
+        table = Table(title=None, box=box.SIMPLE_HEAVY if box else None, show_lines=False, header_style=f"bold {PALETTE['primary']}")
+        table.add_column("country", style=PALETTE["primary"])
+        table.add_column("emissions_co2e", style=PALETTE["accent"], justify="right")
+        for _, row in sub.iterrows():
+            table.add_row(str(row["country"]), f"{row['emissions_co2e']:.3f}")
+        cons.print(table)
+    else:
+        print(sub.to_string(index=False))
 
 
 def cmd_schema(args: argparse.Namespace) -> None:
@@ -233,36 +338,85 @@ def cmd_schema(args: argparse.Namespace) -> None:
 
 def cmd_head(args: argparse.Namespace) -> None:
     df = _load_standardized_df(args.cache_dir)
-    print(df.head(args.rows).to_string(index=False))
+    head = df.head(args.rows)
+    cons = _get_console()
+    if cons and Table is not None:
+        table = Table(title=None, box=box.SIMPLE_HEAVY if box else None, show_lines=False, header_style=f"bold {PALETTE['primary']}")
+        for col in head.columns:
+            table.add_column(col, style=PALETTE["muted"])
+        for _, row in head.iterrows():
+            table.add_row(*[str(v) for v in row.tolist()])
+        cons.print(table)
+    else:
+        print(head.to_string(index=False))
 
 
 def cmd_fetch(args: argparse.Namespace) -> None:
     if args.source.lower() in ("owid", "all"):
         path = data_mod.fetch_owid_co2(cache_dir=args.cache_dir)
-        print(f"Fetched OWID CO2 data -> {path}")
+        cons = _get_console()
+        msg = f"[{PALETTE['ok']}]Fetched OWID CO2 data[/{PALETTE['ok']}] -> {path}"
+        if cons:
+            cons.print(msg)
+        else:
+            print(f"Fetched OWID CO2 data -> {path}")
     else:
-        print("Only 'owid' is supported in MVP. Skipping.")
+        cons = _get_console()
+        msg = f"[{PALETTE['warn']}]Only 'owid' is supported in MVP. Skipping.[/{PALETTE['warn']}]"
+        if cons:
+            cons.print(msg)
+        else:
+            print("Only 'owid' is supported in MVP. Skipping.")
 
 
 def cmd_prepare(args: argparse.Namespace) -> None:
     out = prep_mod.standardize(cache_dir=args.cache_dir)
-    print(f"Standardized dataset -> {out}")
+    cons = _get_console()
+    msg = f"[{PALETTE['ok']}]Standardized dataset[/{PALETTE['ok']}] -> {out}"
+    if cons:
+        cons.print(msg)
+    else:
+        print(f"Standardized dataset -> {out}")
 
 
 def cmd_forecast(args: argparse.Namespace) -> None:
     if not args.country:
-        print("Please specify --country, e.g., --country 'United States'")
+        cons = _get_console()
+        msg = f"[{PALETTE['error']}]Please specify --country, e.g., --country 'United States'[/{PALETTE['error']}]"
+        if cons:
+            cons.print(msg)
+        else:
+            print("Please specify --country, e.g., --country 'United States'")
         sys.exit(2)
     preds = model_mod.train_and_forecast(country=args.country, horizon=args.horizon, cache_dir=args.cache_dir, sector=args.sector)
-    print(preds.to_string(index=False))
+    cons = _get_console()
+    if cons and Table is not None:
+        table = Table(title=None, box=box.SIMPLE_HEAVY if box else None, show_lines=False, header_style=f"bold {PALETTE['primary']}")
+        for col in preds.columns:
+            table.add_column(col, style=PALETTE["muted"] if col not in ("yhat_emissions_co2e",) else PALETTE["accent"])
+        for _, row in preds.iterrows():
+            table.add_row(*[str(v) for v in row.tolist()])
+        cons.print(table)
+    else:
+        print(preds.to_string(index=False))
 
 
 def cmd_plot(args: argparse.Namespace) -> None:
     if not args.country:
-        print("Please specify --country, e.g., --country 'United States'")
+        cons = _get_console()
+        msg = f"[{PALETTE['error']}]Please specify --country, e.g., --country 'United States'[/{PALETTE['error']}]"
+        if cons:
+            cons.print(msg)
+        else:
+            print("Please specify --country, e.g., --country 'United States'")
         sys.exit(2)
     out = viz_mod.plot_country(country=args.country, save_path=args.output, cache_dir=args.cache_dir, sector=args.sector)
-    print(f"Saved plot -> {out}")
+    cons = _get_console()
+    msg = f"[{PALETTE['ok']}]Saved plot[/{PALETTE['ok']}] -> {out}"
+    if cons:
+        cons.print(msg)
+    else:
+        print(f"Saved plot -> {out}")
 
 
 def _parse_countries_arg(countries: Optional[str], countries_file: Optional[str]) -> list[str]:
@@ -444,7 +598,12 @@ def main(argv: Optional[list[str]] = None) -> None:
             except Exception:
                 emissions_kg = None
         if emissions_kg is not None:
-            print(f"CO2e: {_format_emissions(float(emissions_kg))}  |  log: {emissions_dir}")
+            cons = _get_console()
+            text = f"CO2e: {_format_emissions(float(emissions_kg))}  |  "
+            if cons is None:
+                print(text + f"log: {emissions_dir}")
+            else:
+                cons.print(f"{text}[{PALETTE['muted']}]log:[/{PALETTE['muted']}] {emissions_dir}")
 
 
 if __name__ == "__main__":
