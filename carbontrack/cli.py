@@ -17,6 +17,97 @@ except Exception:  # pragma: no cover
     EmissionsTracker = None  # type: ignore
 
 
+def cmd_emissions(args: argparse.Namespace) -> None:
+    from pandas import read_csv, read_json  # local import to keep CLI light
+
+    base = get_cache_dir(args.cache_dir)
+    emissions_dir = base / "emissions"
+
+    # Try common CodeCarbon outputs in priority order
+    candidates = []
+    candidates.append(emissions_dir / "emissions.csv")
+    candidates.extend(sorted(emissions_dir.glob("*.csv")))
+    jsonl_candidates = [emissions_dir / "emissions.jsonl"]
+    jsonl_candidates.extend(sorted(emissions_dir.glob("*.jsonl")))
+
+    df = None
+    last_error = None
+    for csv_path in candidates:
+        if csv_path.exists():
+            try:
+                df = read_csv(csv_path)
+                break
+            except Exception as e:
+                last_error = e
+                continue
+    if df is None:
+        # Try jsonl as a fallback
+        for jl_path in jsonl_candidates:
+            if jl_path.exists():
+                try:
+                    df = read_json(jl_path, lines=True)
+                    break
+                except Exception as e:
+                    last_error = e
+                    continue
+
+    if df is None:
+        hint = "Install CodeCarbon in your environment: pip install codecarbon"
+        if last_error:
+            print(f"No emissions logs found under {emissions_dir}.\nHint: {hint}\n(Last read error: {last_error})")
+        else:
+            print(f"No emissions logs found under {emissions_dir}.\nHint: {hint}")
+        return
+
+    # Sort by timestamp if present; otherwise by index
+    if "timestamp" in df.columns:
+        df = df.sort_values("timestamp")
+
+    if args.path:
+        print(str(csv_path))
+        return
+
+    if args.total:
+        col = "emissions" if "emissions" in df.columns else None
+        if not col:
+            print("Emissions column not found in log.")
+            return
+        total = float(df[col].sum())
+        count = int(len(df))
+        print(f"Total tracked emissions: {total:.6f} kg CO2e across {count} runs")
+        return
+
+    # Select a compact set of columns if available
+    preferred = [
+        "timestamp",
+        "duration",
+        "emissions",  # kg
+        "run_id",
+        "project_name",
+    ]
+    present_cols = [c for c in preferred if c in df.columns]
+    if not present_cols:
+        present_cols = list(df.columns)
+
+    out_df = df.tail(args.last)[present_cols]
+    if args.json:
+        # Minimal JSON array of records
+        import json
+
+        print(json.dumps(out_df.to_dict(orient="records")))
+    else:
+        # Nicely formatted table
+        # Rename a couple columns for readability if present
+        rename_map = {}
+        if "duration" in out_df.columns:
+            rename_map["duration"] = "duration_s"
+        if "emissions" in out_df.columns:
+            rename_map["emissions"] = "emissions_kg"
+        if rename_map:
+            out_df = out_df.rename(columns=rename_map)
+        print(out_df.to_string(index=False))
+
+
 def cmd_fetch(args: argparse.Namespace) -> None:
     if args.source.lower() in ("owid", "all"):
         path = data_mod.fetch_owid_co2(cache_dir=args.cache_dir)
@@ -97,6 +188,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_clean.add_argument("--outputs", action="store_true", help="Remove local *_emissions.png files in CWD")
     p_clean.add_argument("--venv-path", help="Optional path to virtual environment to delete", default=None)
     p_clean.set_defaults(func=cmd_clean)
+
+    p_em = sub.add_parser("emissions", help="Display CodeCarbon emissions logs")
+    p_em.add_argument("--last", type=int, default=5, help="Show last N runs (default 5)")
+    p_em.add_argument("--total", action="store_true", help="Show total emissions across all runs")
+    p_em.add_argument("--json", action="store_true", help="Output JSON instead of table for the selected rows")
+    p_em.add_argument("--path", action="store_true", help="Print the path to the emissions CSV and exit")
+    p_em.set_defaults(func=cmd_emissions)
 
     return p
 

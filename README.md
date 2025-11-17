@@ -55,6 +55,25 @@ Notes
 - The forecasting model is a simple Linear Regression baseline. It can be swapped later for XGBoost.
 - CodeCarbon is enabled by default. Each command run is tracked and a CSV log is written to `<cache_dir>/emissions/`. A brief summary (kg CO2e) is printed after the command completes.
 
+Display emissions
+
+```bash
+# Show last 5 runs (default)
+carbontrack emissions
+
+# Show last 10 runs in a table
+carbontrack emissions --last 10
+
+# Show total kg CO2e across all runs
+carbontrack emissions --total
+
+# Emit JSON for last run (for scripts)
+carbontrack emissions --last 1 --json
+
+# Print the path to the CSV log
+carbontrack emissions --path
+```
+
 Uninstall
 
 ```bash
